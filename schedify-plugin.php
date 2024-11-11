@@ -13,6 +13,7 @@ License: GPL2
 // Function to run on plugin activation
 function schedify_activate_plugin() {
     // Code to execute on activation
+    schedify_create_employee_table();
 }
 register_activation_hook(__FILE__, 'schedify_activate_plugin');
 
@@ -89,3 +90,25 @@ function schedify_custom_fields_page() { echo '<h1>Custom Fields</h1><p>Manage c
 function schedify_settings_page() { echo '<h1>Settings</h1><p>Configure general plugin settings.</p>'; }
 function schedify_license_page() { echo '<h1>License</h1><p>Manage plugin licensing information.</p>'; }
 
+// Function to create employee table in db MWA
+function schedify_create_employee_table() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'schedify_employees';
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE $table_name (
+        id mediumint(9) NOT NULL AUTO_INCREMENT,
+        first_name varchar(255) NOT NULL,
+        last_name varchar(255) NOT NULL,
+        email varchar(255) NOT NULL,
+        phone varchar(20) DEFAULT '',
+        wordpress_user_id bigint(20) DEFAULT 0,
+        timezone varchar(50) DEFAULT 'UTC',
+        employee_badge varchar(50) DEFAULT 'bronze',
+        created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        PRIMARY KEY (id)
+    ) $charset_collate;";
+
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+}

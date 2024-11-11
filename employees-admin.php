@@ -1,19 +1,80 @@
 <?php
+if (!defined('ABSPATH')) {
+    exit; // Exit if accessed directly
+}
+
+global $wpdb;
+$table_name = $wpdb->prefix . 'schedify_employees';
+
 // Add Employee admin page under the custom menu
 function schedify_employee_admin_page() {
-    add_submenu_page(
-        'edit.php?post_type=employee',
-        'Add/Edit Employee',
-        'New Employee',
-        'manage_options',
-        'schedify_employee_form',
-        'schedify_render_employee_form'
-    );
+    // Check if the submenu already exists to prevent duplication
+    global $submenu;
+    if (!isset($submenu['schedify-dashboard'])) {
+        add_submenu_page(
+            'schedify-dashboard',
+            'Add/Edit Employee',
+            // 'Employees',
+            'manage_options',
+            'schedify-employees',
+            'schedify_render_employee_form'
+        );
+    }
 }
 add_action('admin_menu', 'schedify_employee_admin_page');
 
+// Function to render the employee form
 function schedify_render_employee_form() {
-    $employees = []; // Replace with a function to fetch actual employees from the database
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'schedify_employees';
+
+    // Handle add/edit form submission
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $first_name = sanitize_text_field($_POST['first_name']);
+        $last_name = sanitize_text_field($_POST['last_name']);
+        $email = sanitize_email($_POST['email']);
+        $phone = sanitize_text_field($_POST['phone']);
+        $wordpress_user_id = isset($_POST['wordpress_user']) ? intval($_POST['wordpress_user']) : 0;
+        $timezone = sanitize_text_field($_POST['timezone']);
+        $employee_badge = sanitize_text_field($_POST['employee_badge']);
+        
+        if (isset($_POST['employee_id']) && !empty($_POST['employee_id'])) {
+            // Update employee
+            $wpdb->update(
+                $table_name,
+                [
+                    'first_name' => $first_name,
+                    'last_name' => $last_name,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'wordpress_user_id' => $wordpress_user_id,
+                    'timezone' => $timezone,
+                    'employee_badge' => $employee_badge
+                ],
+                ['id' => intval($_POST['employee_id'])],
+                ['%s', '%s', '%s', '%s', '%d', '%s', '%s'],
+                ['%d']
+            );
+        } else {
+            // Insert new employee
+            $wpdb->insert(
+                $table_name,
+                [
+                    'first_name' => $first_name,
+                    'last_name' => $last_name,
+                    'email' => $email,
+                    'phone' => $phone,
+                    'wordpress_user_id' => $wordpress_user_id,
+                    'timezone' => $timezone,
+                    'employee_badge' => $employee_badge
+                ],
+                ['%s', '%s', '%s', '%s', '%d', '%s', '%s']
+            );
+        }
+    }
+
+    // Fetch all employees from the database
+    $employees = $wpdb->get_results("SELECT * FROM $table_name");
     $employee_count = count($employees);
     $has_employees = $employee_count > 0;
     ?>
@@ -27,7 +88,31 @@ function schedify_render_employee_form() {
         <?php if ($has_employees): ?>
             <!-- Display the list of employees -->
             <div class="employee-list">
-                <!-- Loop through employees and display each one here -->
+                <table class="wp-list-table widefat fixed striped">
+                    <thead>
+                        <tr>
+                            <th>First Name</th>
+                            <th>Last Name</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($employees as $employee): ?>
+                            <tr>
+                                <td><?php echo esc_html($employee->first_name); ?></td>
+                                <td><?php echo esc_html($employee->last_name); ?></td>
+                                <td><?php echo esc_html($employee->email); ?></td>
+                                <td><?php echo esc_html($employee->phone); ?></td>
+                                <td>
+                                    <a href="?page=schedify-employees&action=edit&id=<?php echo $employee->id; ?>">Edit</a> | 
+                                    <a href="?page=schedify-employees&action=delete&id=<?php echo $employee->id; ?>" onclick="return confirm('Are you sure you want to delete this employee?')">Delete</a>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
             </div>
         <?php else: ?>
             <div class="no-employees">
@@ -48,7 +133,8 @@ function schedify_render_employee_form() {
                     <img src="https://example.com/path-to-placeholder-avatar.png" alt="Employee Avatar" class="employee-avatar">
                 </div>
 
-                <form method="post" action="">
+                <form method="post">
+                    <input type="hidden" name="employee_id" value="<?php echo isset($_GET['id']) ? esc_attr($_GET['id']) : ''; ?>" />
                     <!-- Tab navigation -->
                     <nav>
                         <ul class="schedify-tabs">
@@ -60,27 +146,27 @@ function schedify_render_employee_form() {
                         </ul>
                     </nav>
 
-                    <!-- Tab contents - All sections are included here -->
+                    <!-- Tab contents - Details section -->
                     <div id="details" class="tab-content active">
                         <div class="field-row">
                             <div class="field-column">
                                 <label for="first_name">First Name:</label>
-                                <input type="text" name="first_name" class="form-field" required />
+                                <input type="text" name="first_name" class="form-field" required value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->first_name) : ''; ?>" />
                             </div>
                             <div class="field-column">
                                 <label for="last_name">Last Name:</label>
-                                <input type="text" name="last_name" class="form-field" required />
+                                <input type="text" name="last_name" class="form-field" required value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->last_name) : ''; ?>" />
                             </div>
                         </div>
 
                         <div class="field-row">
                             <div class="field-column">
                                 <label for="email">Email:</label>
-                                <input type="email" name="email" class="form-field" required />
+                                <input type="email" name="email" class="form-field" required value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->email) : ''; ?>" />
                             </div>
                             <div class="field-column">
                                 <label for="phone">Phone:</label>
-                                <input type="tel" name="phone" class="form-field" />
+                                <input type="tel" name="phone" class="form-field" value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->phone) : ''; ?>" />
                             </div>
                         </div>
 
@@ -113,8 +199,6 @@ function schedify_render_employee_form() {
                             </div>
                         </div>
                     </div>
-
-                    <!-- Additional tab contents... -->
 
                     <div class="form-footer">
                         <button type="submit" class="button button-primary">Save</button>
@@ -296,3 +380,4 @@ function schedify_render_employee_form() {
     </script>
     <?php
 }
+?>
