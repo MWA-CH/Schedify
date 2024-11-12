@@ -6,23 +6,6 @@ if (!defined('ABSPATH')) {
 global $wpdb;
 $table_name = $wpdb->prefix . 'schedify_employees';
 
-// Add Employee admin page under the custom menu
-function schedify_employee_admin_page() {
-    // Check if the submenu already exists to prevent duplication
-    global $submenu;
-    if (!isset($submenu['schedify-dashboard'])) {
-        add_submenu_page(
-            'schedify-dashboard',
-            'Add/Edit Employee',
-            // 'Employees',
-            'manage_options',
-            'schedify-employees',
-            'schedify_render_employee_form'
-        );
-    }
-}
-add_action('admin_menu', 'schedify_employee_admin_page');
-
 // Function to render the employee form
 function schedify_render_employee_form() {
     global $wpdb;
@@ -38,7 +21,9 @@ function schedify_render_employee_form() {
         $timezone = sanitize_text_field($_POST['timezone']);
         $employee_badge = sanitize_text_field($_POST['employee_badge']);
         
-        if (isset($_POST['employee_id']) && !empty($_POST['employee_id'])) {
+        $is_update = isset($_POST['employee_id']) && !empty($_POST['employee_id']);
+        
+        if ($is_update) {
             // Update employee
             $wpdb->update(
                 $table_name,
@@ -71,6 +56,25 @@ function schedify_render_employee_form() {
                 ['%s', '%s', '%s', '%s', '%d', '%s', '%s']
             );
         }
+        $message = $is_update ? 'Employee information updated successfully!' : 'New employee added successfully!';
+        echo '<script>
+            document.getElementById("employee-modal").classList.remove("show");
+            alert("' . $message . '");
+            window.location.href = "?page=schedify-employees";
+        </script>';
+    }
+
+    // Handle deleting employee
+    if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['id'])) {
+        $employee_id = intval($_GET['id']);
+        $wpdb->delete($table_name, ['id' => $employee_id], ['%d']);
+    }
+
+    // Handle editing employee
+    $employee = null;
+    if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) {
+        $employee_id = intval($_GET['id']);
+        $employee = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $employee_id));
     }
 
     // Fetch all employees from the database
@@ -83,6 +87,10 @@ function schedify_render_employee_form() {
         <div class="employee-header">
             <h1>Employees <span class="employee-count">(<?php echo $employee_count; ?> Total)</span></h1>
             <button id="add-employee-button" class="button button-primary">+ Add Employee</button>
+        </div>
+
+        <div id="notification" style="display:none;" class="updated notice is-dismissible">
+            <p id="notification-message"></p>
         </div>
 
         <?php if ($has_employees): ?>
@@ -99,15 +107,15 @@ function schedify_render_employee_form() {
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($employees as $employee): ?>
+                        <?php foreach ($employees as $emp): ?>
                             <tr>
-                                <td><?php echo esc_html($employee->first_name); ?></td>
-                                <td><?php echo esc_html($employee->last_name); ?></td>
-                                <td><?php echo esc_html($employee->email); ?></td>
-                                <td><?php echo esc_html($employee->phone); ?></td>
+                                <td><?php echo esc_html($emp->first_name); ?></td>
+                                <td><?php echo esc_html($emp->last_name); ?></td>
+                                <td><?php echo esc_html($emp->email); ?></td>
+                                <td><?php echo esc_html($emp->phone); ?></td>
                                 <td>
-                                    <a href="?page=schedify-employees&action=edit&id=<?php echo $employee->id; ?>">Edit</a> | 
-                                    <a href="?page=schedify-employees&action=delete&id=<?php echo $employee->id; ?>" onclick="return confirm('Are you sure you want to delete this employee?')">Delete</a>
+                                    <a href="?page=schedify-employees&action=edit&id=<?php echo $emp->id; ?>">Edit</a> | 
+                                    <a href="?page=schedify-employees&action=delete&id=<?php echo $emp->id; ?>" onclick="return confirm('Are you sure you want to delete this employee?')">Delete</a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -123,18 +131,19 @@ function schedify_render_employee_form() {
         <?php endif; ?>
 
         <!-- Modal for Employee Form -->
-        <div id="employee-modal" class="modal">
+        <div id="employee-modal" class="modal <?php echo isset($_GET['action']) && $_GET['action'] === 'edit' ? 'show' : ''; ?>">
             <div class="modal-content">
                 <span class="close-button" id="close-employee-modal">&times;</span>
-                <h2 class="modal-title">New Employee</h2>
+                <h2 class="modal-title"><?php echo isset($employee) ? 'Edit Employee' : 'New Employee'; ?></h2>
                 
                 <!-- Employee Image Placeholder -->
                 <div class="employee-image-container">
                     <img src="https://example.com/path-to-placeholder-avatar.png" alt="Employee Avatar" class="employee-avatar">
                 </div>
 
-                <form method="post">
-                    <input type="hidden" name="employee_id" value="<?php echo isset($_GET['id']) ? esc_attr($_GET['id']) : ''; ?>" />
+                <form id="employee-form">
+                    <input type="hidden" name="employee_id" value="<?php echo isset($employee) ? esc_attr($employee->id) : ''; ?>" />
+                    <input type="hidden" name="action" value="schedify_save_employee" />
                     <!-- Tab navigation -->
                     <nav>
                         <ul class="schedify-tabs">
@@ -151,22 +160,22 @@ function schedify_render_employee_form() {
                         <div class="field-row">
                             <div class="field-column">
                                 <label for="first_name">First Name:</label>
-                                <input type="text" name="first_name" class="form-field" required value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->first_name) : ''; ?>" />
+                                <input type="text" name="first_name" class="form-field" required value="<?php echo isset($employee) ? esc_attr($employee->first_name) : ''; ?>" />
                             </div>
                             <div class="field-column">
                                 <label for="last_name">Last Name:</label>
-                                <input type="text" name="last_name" class="form-field" required value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->last_name) : ''; ?>" />
+                                <input type="text" name="last_name" class="form-field" required value="<?php echo isset($employee) ? esc_attr($employee->last_name) : ''; ?>" />
                             </div>
                         </div>
 
                         <div class="field-row">
                             <div class="field-column">
                                 <label for="email">Email:</label>
-                                <input type="email" name="email" class="form-field" required value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->email) : ''; ?>" />
+                                <input type="email" name="email" class="form-field" required value="<?php echo isset($employee) ? esc_attr($employee->email) : ''; ?>" />
                             </div>
                             <div class="field-column">
                                 <label for="phone">Phone:</label>
-                                <input type="tel" name="phone" class="form-field" value="<?php echo isset($_GET['id']) && isset($employee) ? esc_attr($employee->phone) : ''; ?>" />
+                                <input type="tel" name="phone" class="form-field" value="<?php echo isset($employee) ? esc_attr($employee->phone) : ''; ?>" />
                             </div>
                         </div>
 
@@ -179,7 +188,7 @@ function schedify_render_employee_form() {
                             </div>
                             <div class="field-column">
                                 <label for="timezone">Timezone:</label>
-                                <input type="text" name="timezone" class="form-field" value="UTC" />
+                                <input type="text" name="timezone" class="form-field" value="<?php echo isset($employee) ? esc_attr($employee->timezone) : 'UTC'; ?>" />
                             </div>
                         </div>
 
@@ -191,10 +200,9 @@ function schedify_render_employee_form() {
                             <div class="field-column">
                                 <label for="employee_badge">Employee Badge:</label>
                                 <select name="employee_badge" class="form-field">
-                                    <option value="gold">Gold</option>
-                                    <option value="silver">Silver</option>
-                                    <option value="bronze">Bronze</option>
-                                    <!-- Additional options can be added here -->
+                                    <option value="gold" <?php echo isset($employee) && $employee->employee_badge === 'gold' ? 'selected' : ''; ?>>Gold</option>
+                                    <option value="silver" <?php echo isset($employee) && $employee->employee_badge === 'silver' ? 'selected' : ''; ?>>Silver</option>
+                                    <option value="bronze" <?php echo isset($employee) && $employee->employee_badge === 'bronze' ? 'selected' : ''; ?>>Bronze</option>
                                 </select>
                             </div>
                         </div>
@@ -347,6 +355,8 @@ function schedify_render_employee_form() {
             const addEmployeeButton = document.getElementById('add-employee-button');
             const employeeModal = document.getElementById('employee-modal');
             const closeEmployeeModal = document.getElementById('close-employee-modal');
+            const notification = document.getElementById('notification');
+            const notificationMessage = document.getElementById('notification-message');
 
             // Show modal with animation
             addEmployeeButton.addEventListener('click', function() {
@@ -374,6 +384,38 @@ function schedify_render_employee_form() {
                     contents.forEach(c => c.classList.remove('active'));
                     tab.classList.add('active');
                     document.getElementById(tab.getAttribute('data-tab')).classList.add('active');
+                });
+            });
+
+            // Handle form submission with AJAX
+            const employeeForm = document.getElementById('employee-form');
+            employeeForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+
+                const formData = new FormData(employeeForm);
+
+                fetch(ajaxurl, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        employeeModal.classList.remove('show');
+                        notificationMessage.innerText = formData.get('employee_id') ? 'Employee information updated successfully!' : 'New employee added successfully!';
+                        notification.style.display = 'block';
+
+                        setTimeout(() => {
+                            notification.style.display = 'none';
+                            window.location.href = '?page=schedify-employees';
+                        }, 2000);
+                    } else {
+                        alert('An error occurred while saving the employee information.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while saving the employee information.');
                 });
             });
         });
