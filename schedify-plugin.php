@@ -9,21 +9,37 @@ Author URI: https://reyman.net/
 License: GPL2
 */
 
-
 // Function to run on plugin activation
 function schedify_activate_plugin() {
-    // Code to execute on activation
-    schedify_create_employee_table();
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'schedify_employees';
+    
+    $charset_collate = $wpdb->get_charset_collate();
+
+    $sql = "CREATE TABLE $table_name (
+        id mediumint(9) NOT NULL AUTO_INCREMENT,
+        first_name varchar(255) NOT NULL,
+        last_name varchar(255) NOT NULL,
+        email varchar(100) NOT NULL,
+        phone varchar(20),
+        wordpress_user_id bigint(20) unsigned,
+        timezone varchar(50),
+        employee_badge varchar(50),
+        PRIMARY KEY  (id)
+    ) $charset_collate;";
+
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
 }
 register_activation_hook(__FILE__, 'schedify_activate_plugin');
 
-require_once plugin_dir_path(__FILE__) . 'employees-admin.php';
-
 // Function to run on plugin deactivation
 function schedify_deactivate_plugin() {
-    // Code to execute on deactivation
+    // Code to execute on deactivation if needed
 }
 register_deactivation_hook(__FILE__, 'schedify_deactivate_plugin');
+
+require_once plugin_dir_path(__FILE__) . 'employees-admin.php';
 
 // Register the Schedify menu in the WordPress admin panel
 function schedify_register_menu() {
@@ -45,7 +61,7 @@ function schedify_register_submenus() {
         'Dashboard'     => 'schedify_dashboard_page',
         'Calendar'      => 'schedify_calendar_page',
         'Services'      => 'schedify_services_page',
-        'Employees'     => 'schedify_employees_page',  // Link to employees page function
+        'Employees'     => 'schedify_employees_page',
         'Locations'     => 'schedify_locations_page',
         'Appointments'  => 'schedify_appointments_page',
         'Events'        => 'schedify_events_page',
@@ -71,14 +87,11 @@ function schedify_register_submenus() {
 }
 add_action('admin_menu', 'schedify_register_submenus');
 
-// Include the custom employee admin page file
-require_once plugin_dir_path(__FILE__) . 'employees-admin.php';
-
 // Callback functions for each submenu page
 function schedify_dashboard_page() { echo '<h1>Dashboard</h1><p>Overview of your booking system.</p>'; }
 function schedify_calendar_page() { echo '<h1>Calendar</h1><p>View all bookings in a calendar format.</p>'; }
 function schedify_services_page() { echo '<h1>Services</h1><p>Manage services offered for bookings.</p>'; }
-function schedify_employees_page() { schedify_render_employee_form(); }  // Link to employee form rendering
+function schedify_employees_page() { schedify_render_employee_form(); }
 function schedify_locations_page() { echo '<h1>Locations</h1><p>Manage service locations.</p>'; }
 function schedify_appointments_page() { echo '<h1>Appointments</h1><p>View and manage individual appointments.</p>'; }
 function schedify_events_page() { echo '<h1>Events</h1><p>Manage events for bookings.</p>'; }
@@ -90,25 +103,69 @@ function schedify_custom_fields_page() { echo '<h1>Custom Fields</h1><p>Manage c
 function schedify_settings_page() { echo '<h1>Settings</h1><p>Configure general plugin settings.</p>'; }
 function schedify_license_page() { echo '<h1>License</h1><p>Manage plugin licensing information.</p>'; }
 
-// Function to create employee table in db MWA
-function schedify_create_employee_table() {
+// AJAX handler for saving employee data
+function schedify_handle_employee_ajax() {
     global $wpdb;
     $table_name = $wpdb->prefix . 'schedify_employees';
-    $charset_collate = $wpdb->get_charset_collate();
 
-    $sql = "CREATE TABLE $table_name (
-        id mediumint(9) NOT NULL AUTO_INCREMENT,
-        first_name varchar(255) NOT NULL,
-        last_name varchar(255) NOT NULL,
-        email varchar(255) NOT NULL,
-        phone varchar(20) DEFAULT '',
-        wordpress_user_id bigint(20) DEFAULT 0,
-        timezone varchar(50) DEFAULT 'UTC',
-        employee_badge varchar(50) DEFAULT 'bronze',
-        created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        PRIMARY KEY (id)
-    ) $charset_collate;";
+    $employee_id = isset($_POST['employee_id']) ? intval($_POST['employee_id']) : null;
+    $first_name = sanitize_text_field($_POST['first_name']);
+    $last_name = sanitize_text_field($_POST['last_name']);
+    $email = sanitize_email($_POST['email']);
+    $phone = sanitize_text_field($_POST['phone']);
+    $timezone = sanitize_text_field($_POST['timezone']);
+    $employee_badge = sanitize_text_field($_POST['employee_badge']);
 
-    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-    dbDelta($sql);
+    if ($employee_id) {
+        // Update employee
+        $updated = $wpdb->update(
+            $table_name,
+            [
+                'first_name' => $first_name,
+                'last_name' => $last_name,
+                'email' => $email,
+                'phone' => $phone,
+                'timezone' => $timezone,
+                'employee_badge' => $employee_badge,
+            ],
+            ['id' => $employee_id],
+            ['%s', '%s', '%s', '%s', '%s', '%s'],
+            ['%d']
+        );
+
+        if ($updated !== false) {
+            wp_send_json_success();
+        } else {
+            wp_send_json_error(['message' => 'Failed to update employee.']);
+        }
+    } else {
+        // Insert new employee
+        $inserted = $wpdb->insert(
+            $table_name,
+            [
+                'first_name' => $first_name,
+                'last_name' => $last_name,
+                'email' => $email,
+                'phone' => $phone,
+                'timezone' => $timezone,
+                'employee_badge' => $employee_badge,
+            ],
+            ['%s', '%s', '%s', '%s', '%s', '%s']
+        );
+
+        if ($inserted) {
+            wp_send_json_success();
+        } else {
+            wp_send_json_error(['message' => 'Failed to add new employee.']);
+        }
+    }
 }
+add_action('wp_ajax_schedify_save_employee', 'schedify_handle_employee_ajax');
+
+// Enqueue JavaScript and localize ajaxurl for the admin page
+function schedify_enqueue_scripts() {
+    wp_enqueue_script('jquery'); // Ensure jQuery is available
+    wp_localize_script('jquery', 'ajaxurl', admin_url('admin-ajax.php'));
+}
+add_action('admin_enqueue_scripts', 'schedify_enqueue_scripts');
+?>
